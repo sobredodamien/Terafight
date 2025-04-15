@@ -1,63 +1,165 @@
+// === Frontend JS ===
+// Fichier : public/game.js
+
 const socket = io();
 let roomId = '';
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
+const MAP_SIZE = 1024;
+const PLAYER_SIZE = 20;
+const SPEED = 3;
+const DASH_SPEED = 50;
+const DASH_COOLDOWN = 2000;
+const PROJECTILE_SPEED = 7;
+const INVINCIBLE_TIME = 3000;
+const SHOOT_COOLDOWN = 1000;
+
+let players = {}; // id: { x, y, color, invincibleUntil, hits }
+let projectiles = [];
+let walls = [
+  { x: 300, y: 300, w: 100, h: 20 },
+  { x: 600, y: 600, w: 20, h: 100 },
+  { x: 700, y: 100, w: 20, h: 100 },
+  { x: 200, y: 700, w: 100, h: 20 }
+];
+let scores = [];
+let myColor = 'lime';
+let joined = false;
+let keys = {};
+let mouse = { x: 0, y: 0 };
+let mouseDown = false;
+let lastShotTime = 0;
+
+let myPos = {
+  x: MAP_SIZE / 2,
+  y: MAP_SIZE / 2,
+  dashReady: true,
+  lastDash: 0,
+  invincibleUntil: 0
+};
+
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-const GRAVITY = 0.5;
-const JUMP_STRENGTH = -10;
-const FLOOR_Y = canvas.height - 40;
+function drawCooldown() {
+  const now = Date.now();
+  const delta = Math.max(0, DASH_COOLDOWN - (now - myPos.lastDash));
+  const seconds = (delta / 1000).toFixed(1);
+  ctx.fillStyle = '#fff';
+  ctx.font = '16px sans-serif';
+  ctx.fillText(delta === 0 ? 'Dash prêt' : `Dash : ${seconds}s`, canvas.width - 120, canvas.height - 20);
+}
 
-let players = {}; // id: { x, y, color }
-let myPos = { x: 100, y: FLOOR_Y, vy: 0, grounded: true, jumping: false };
-let keys = {};
-let myColor = 'lime';
-let joined = false;
+function drawScores() {
+  ctx.font = '14px sans-serif';
+  let y = 20;
+  scores.forEach(({ color, score }) => {
+    ctx.fillStyle = color;
+    ctx.fillText(`${color}: ${score}`, canvas.width - 120, y);
+    y += 18;
+  });
+}
 
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  ctx.fillStyle = '#444';
-  ctx.fillRect(0, FLOOR_Y + 20, canvas.width, 10);
+  const offsetX = canvas.width / 2 - myPos.x;
+  const offsetY = canvas.height / 2 - myPos.y;
+
+  // bordure de map
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(offsetX, offsetY, MAP_SIZE, MAP_SIZE);
+
+  // murs
+  ctx.fillStyle = '#666';
+  for (const wall of walls) {
+    ctx.fillRect(wall.x + offsetX, wall.y + offsetY, wall.w, wall.h);
+  }
 
   for (const id in players) {
     const p = players[id];
-    ctx.fillStyle = p.color || 'red';
-    ctx.fillRect(p.x, p.y, 20, 20);
+    ctx.fillStyle = p.invincibleUntil && Date.now() < p.invincibleUntil ? 'gray' : p.color || 'red';
+    ctx.fillRect(p.x + offsetX, p.y + offsetY, PLAYER_SIZE, PLAYER_SIZE);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Touche: ${p.hits || 0}`, p.x + PLAYER_SIZE / 2 + offsetX, p.y - 5 + offsetY);
   }
 
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.beginPath();
+  ctx.moveTo(canvas.width / 2, canvas.height / 2);
+  ctx.lineTo(mouse.x, mouse.y);
+  ctx.stroke();
+
+  ctx.fillStyle = '#fff';
+  for (const p of projectiles) {
+    ctx.beginPath();
+    ctx.arc(p.x + offsetX, p.y + offsetY, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawCooldown();
+  drawScores();
   requestAnimationFrame(draw);
 }
 
+function collidesWall(x, y, size = PLAYER_SIZE) {
+  return walls.some(w => x + size > w.x && x < w.x + w.w && y + size > w.y && y < w.y + w.h);
+}
+
 function update() {
-  const speed = 3;
+  let nextX = myPos.x;
+  let nextY = myPos.y;
+  if (keys['w']) nextY -= SPEED;
+  if (keys['s']) nextY += SPEED;
+  if (keys['a']) nextX -= SPEED;
+  if (keys['d']) nextX += SPEED;
 
-  if (keys['a']) myPos.x -= speed;
-  if (keys['d']) myPos.x += speed;
+  // bordures map + murs
+  if (nextX >= 0 && nextX + PLAYER_SIZE <= MAP_SIZE && !collidesWall(nextX, myPos.y)) myPos.x = nextX;
+  if (nextY >= 0 && nextY + PLAYER_SIZE <= MAP_SIZE && !collidesWall(myPos.x, nextY)) myPos.y = nextY;
 
-  if (keys[' '] && myPos.grounded && !myPos.jumping) {
-    myPos.vy = JUMP_STRENGTH;
-    myPos.grounded = false;
-    myPos.jumping = true;
+  players[socket.id].x = myPos.x;
+  players[socket.id].y = myPos.y;
+
+  const now = Date.now();
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    p.x += p.dx;
+    p.y += p.dy;
+
+    if (p.x < 0 || p.x > MAP_SIZE || p.y < 0 || p.y > MAP_SIZE || collidesWall(p.x, p.y, 4)) {
+      projectiles.splice(i, 1);
+      continue;
+    }
+
+    for (const id in players) {
+      if (id !== p.from) {
+        const target = players[id];
+        const dist = Math.hypot(p.x - target.x, p.y - target.y);
+        if (dist < PLAYER_SIZE && (!target.invincibleUntil || now > target.invincibleUntil)) {
+          if (!p.hit) {
+            p.hit = true;
+            if (p.from && players[p.from]) {
+              players[p.from].hits = (players[p.from].hits || 0) + 1;
+            }
+            if (players[id].hits > 0) players[id].hits = 0;
+          }
+        }
+      }
+    }
   }
 
-  if (!keys[' ']) {
-    myPos.jumping = false;
-  }
-
-  myPos.vy += GRAVITY;
-  myPos.y += myPos.vy;
-
-  if (myPos.y >= FLOOR_Y) {
-    myPos.y = FLOOR_Y;
-    myPos.vy = 0;
-    myPos.grounded = true;
-  }
-
-  players[socket.id] = { x: myPos.x, y: myPos.y, color: myColor };
   socket.emit('move', { roomId, position: { x: myPos.x, y: myPos.y } });
+
+  if (mouseDown && now - lastShotTime > SHOOT_COOLDOWN) {
+    shootProjectile();
+    lastShotTime = now;
+  }
 }
 
 function gameLoop() {
@@ -70,22 +172,61 @@ function joinRoom() {
   myColor = window.getSelectedColor();
   if (roomId && !joined) {
     joined = true;
+    myPos.x = MAP_SIZE / 2;
+    myPos.y = MAP_SIZE / 2;
+    myPos.invincibleUntil = Date.now() + INVINCIBLE_TIME;
+    players[socket.id] = { x: myPos.x, y: myPos.y, color: myColor, invincibleUntil: myPos.invincibleUntil, hits: 0 };
     socket.emit('join', { roomId, color: myColor });
-    players[socket.id] = { x: myPos.x, y: myPos.y, color: myColor };
     draw();
     gameLoop();
   }
 }
 
+function shootProjectile() {
+  const offsetX = canvas.width / 2 - myPos.x;
+  const offsetY = canvas.height / 2 - myPos.y;
+  const targetX = mouse.x - offsetX;
+  const targetY = mouse.y - offsetY;
+  const dx = targetX - (myPos.x + PLAYER_SIZE / 2);
+  const dy = targetY - (myPos.y + PLAYER_SIZE / 2);
+  const len = Math.sqrt(dx * dx + dy * dy);
+  const unitX = (dx / len) * PROJECTILE_SPEED;
+  const unitY = (dy / len) * PROJECTILE_SPEED;
+  const projectile = {
+    x: myPos.x + PLAYER_SIZE / 2,
+    y: myPos.y + PLAYER_SIZE / 2,
+    dx: unitX,
+    dy: unitY,
+    color: myColor,
+    from: socket.id
+  };
+  projectiles.push(projectile);
+  socket.emit('shoot', { roomId, projectile });
+}
+
 socket.on('playerJoined', ({ id, color }) => {
-  players[id] = { x: 100, y: FLOOR_Y, color };
+  players[id] = { x: MAP_SIZE / 2, y: MAP_SIZE / 2, color, invincibleUntil: 0, hits: 0 };
 });
 
 socket.on('playerMoved', ({ id, position }) => {
-  if (players[id]) {
-    players[id].x = position.x;
-    players[id].y = position.y;
-  }
+  if (!players[id]) return;
+  players[id].x = position.x;
+  players[id].y = position.y;
+});
+
+socket.on('playerRespawn', ({ id }) => {
+  if (!players[id]) return;
+  players[id].x = MAP_SIZE / 2;
+  players[id].y = MAP_SIZE / 2;
+  players[id].invincibleUntil = Date.now() + INVINCIBLE_TIME;
+});
+
+socket.on('projectileFired', (projectile) => {
+  projectiles.push(projectile);
+});
+
+socket.on('updateScores', (data) => {
+  scores = data;
 });
 
 socket.on('playerLeft', (id) => {
@@ -93,12 +234,40 @@ socket.on('playerLeft', (id) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === ' ' || e.key === 'Enter') {
-    e.preventDefault();
-  }
+  if (e.key === ' ' || e.key === 'Enter') e.preventDefault();
   keys[e.key.toLowerCase()] = true;
+
+  if (e.key === ' ' && myPos.dashReady) {
+    let dx = 0, dy = 0;
+    if (keys['w']) dy = -1;
+    if (keys['s']) dy = 1;
+    if (keys['a']) dx = -1;
+    if (keys['d']) dx = 1;
+    const nextX = myPos.x + dx * DASH_SPEED;
+    const nextY = myPos.y + dy * DASH_SPEED;
+    if (!collidesWall(nextX, myPos.y)) myPos.x = Math.max(0, Math.min(MAP_SIZE - PLAYER_SIZE, nextX));
+    if (!collidesWall(myPos.x, nextY)) myPos.y = Math.max(0, Math.min(MAP_SIZE - PLAYER_SIZE, nextY));
+    myPos.dashReady = false;
+    myPos.lastDash = Date.now();
+    setTimeout(() => {
+      myPos.dashReady = true;
+    }, DASH_COOLDOWN);
+  }
 });
 
 document.addEventListener('keyup', (e) => {
   keys[e.key.toLowerCase()] = false;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  mouse.x = e.clientX;
+  mouse.y = e.clientY;
+});
+
+canvas.addEventListener('mousedown', () => {
+  mouseDown = true;
+});
+
+canvas.addEventListener('mouseup', () => {
+  mouseDown = false;
 });
