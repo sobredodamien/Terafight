@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Jeu 2D Multijoueur</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100%;
+      background: #111;
+      font-family: sans-serif;
+    }
+    #menu {
+      position: absolute;
+      top: 0;
+      width: 100%;
+      background: #222;
+      padding: 10px;
+      box-sizing: border-box;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      z-index: 10;
+    }
+    #menu input, #menu button {
+      font-size: 16px;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 4px;
+      outline: none;
+    }
+    #menu input {
+      background: #444;
+      color: #fff;
+    }
+    #menu button {
+      background: #0af;
+      color: white;
+      cursor: pointer;
+    }
+    #menu button:hover {
+      background: #08c;
+    }
+    #colorPicker {
+      display: flex;
+      gap: 5px;
+    }
+    .color-choice {
+      width: 20px;
+      height: 20px;
+      border-radius: 3px;
+      border: 2px solid transparent;
+      cursor: pointer;
+    }
+    .color-choice.selected {
+      border: 2px solid white;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="menu">
+    <input id="roomInput" placeholder="Code de la partie">
+    <div id="colorPicker"></div>
+    <button id="joinBtn" onclick="joinRoom()">Rejoindre</button>
+  </div>
+  <canvas id="gameCanvas"></canvas>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="game.js"></script>
+  <script>
+    const colors = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'cyan', 'magenta'];
+    const colorPicker = document.getElementById('colorPicker');
+    let selectedColor = colors[0];
+
+    colors.forEach(color => {
+      const div = document.createElement('div');
+      div.classList.add('color-choice');
+      div.style.backgroundColor = color;
+      if (color === selectedColor) div.classList.add('selected');
+      div.onclick = () => {
+        selectedColor = color;
+        document.querySelectorAll('.color-choice').forEach(el => el.classList.remove('selected'));
+        div.classList.add('selected');
+      };
+      colorPicker.appendChild(div);
+    });
+
+    window.getSelectedColor = () => selectedColor;
+  </script>
+</body>
+</html>
