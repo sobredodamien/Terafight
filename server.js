@@ -17,14 +17,17 @@ io.on('connection', (socket) => {
     players[socket.id] = { roomId, color, score: 0 };
     console.log(`Joueur ${socket.id} a rejoint la salle ${roomId} avec la couleur ${color}`);
 
+    // informe les autres
     socket.to(roomId).emit('playerJoined', { id: socket.id, color });
-    io.to(roomId).emit('updateScores', getScores(players, roomId));
 
+    // envoie tous les joueurs à ce nouveau
     for (const [id, data] of Object.entries(players)) {
       if (id !== socket.id && data.roomId === roomId) {
         socket.emit('playerJoined', { id, color: data.color });
       }
     }
+
+    io.to(roomId).emit('updateScores', getScores(players, roomId));
   });
 
   socket.on('move', ({ roomId, position }) => {
@@ -37,9 +40,21 @@ io.on('connection', (socket) => {
 
   socket.on('hit', ({ targetId, shooterId }) => {
     if (players[targetId] && players[shooterId]) {
-      players[shooterId].score++;
-      io.to(players[shooterId].roomId).emit('playerRespawn', { id: targetId });
-      io.to(players[shooterId].roomId).emit('updateScores', getScores(players, players[shooterId].roomId));
+      const roomId = players[shooterId].roomId;
+
+      // évite de tricher en touchant plusieurs fois très vite
+      players[shooterId].score += 1;
+
+      // reset le score du joueur touché s’il avait des points
+      if (players[targetId].score > 0) {
+        players[targetId].score = 0;
+      }
+
+      // respawn le joueur touché
+      io.to(roomId).emit('playerRespawn', { id: targetId });
+
+      // met à jour les scores
+      io.to(roomId).emit('updateScores', getScores(players, roomId));
     }
   });
 

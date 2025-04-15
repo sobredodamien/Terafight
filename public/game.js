@@ -3,13 +3,14 @@
 
 const socket = io();
 let roomId = '';
+let effects = []; // pour stocker les explosions
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
 const MAP_SIZE = 1024;
 const PLAYER_SIZE = 20;
 const SPEED = 3;
-const DASH_SPEED = 50;
+const DASH_SPEED = 100;
 const DASH_COOLDOWN = 2000;
 const PROJECTILE_SPEED = 7;
 const INVINCIBLE_TIME = 3000;
@@ -18,15 +19,48 @@ const SHOOT_COOLDOWN = 1000;
 let players = {}; // id: { x, y, color, invincibleUntil, hits }
 let projectiles = [];
 let walls = [
-  { x: 300, y: 300, w: 100, h: 20 },
+  // zone centrale
+  { x: 490, y: 470, w: 40, h: 40 },
+
+  // haut gauche
+  { x: 100, y: 100, w: 60, h: 20 },
+  { x: 180, y: 180, w: 20, h: 80 },
+  { x: 250, y: 120, w: 80, h: 20 },
+
+  // haut droit
+  { x: 820, y: 100, w: 60, h: 20 },
+  { x: 780, y: 200, w: 20, h: 80 },
+  { x: 670, y: 150, w: 80, h: 20 },
+
+  // bas gauche
+  { x: 120, y: 820, w: 60, h: 20 },
+  { x: 200, y: 700, w: 20, h: 100 },
+  { x: 300, y: 880, w: 100, h: 20 },
+
+  // bas droit
+  { x: 820, y: 820, w: 60, h: 20 },
+  { x: 700, y: 750, w: 20, h: 100 },
+  { x: 580, y: 880, w: 100, h: 20 },
+
+  // couloirs / obstacles
+  { x: 300, y: 300, w: 20, h: 100 },
+  { x: 400, y: 200, w: 100, h: 20 },
+  { x: 600, y: 300, w: 20, h: 100 },
+  { x: 500, y: 700, w: 100, h: 20 },
+  { x: 400, y: 600, w: 20, h: 100 },
   { x: 600, y: 600, w: 20, h: 100 },
-  { x: 700, y: 100, w: 20, h: 100 },
-  { x: 200, y: 700, w: 100, h: 20 }
+
+  // léger contour
+  { x: 0, y: 500, w: 100, h: 20 },
+  { x: 924, y: 500, w: 100, h: 20 },
+  { x: 500, y: 0, w: 20, h: 100 },
+  { x: 500, y: 924, w: 20, h: 100 }
 ];
+
 let scores = [];
 let myColor = 'lime';
 let joined = false;
-let keys = {};
+let keys = {}
 let mouse = { x: 0, y: 0 };
 let mouseDown = false;
 let lastShotTime = 0;
@@ -67,12 +101,10 @@ function draw() {
   const offsetX = canvas.width / 2 - myPos.x;
   const offsetY = canvas.height / 2 - myPos.y;
 
-  // bordure de map
   ctx.strokeStyle = '#555';
   ctx.lineWidth = 4;
   ctx.strokeRect(offsetX, offsetY, MAP_SIZE, MAP_SIZE);
 
-  // murs
   ctx.fillStyle = '#666';
   for (const wall of walls) {
     ctx.fillRect(wall.x + offsetX, wall.y + offsetY, wall.w, wall.h);
@@ -83,23 +115,40 @@ function draw() {
     ctx.fillStyle = p.invincibleUntil && Date.now() < p.invincibleUntil ? 'gray' : p.color || 'red';
     ctx.fillRect(p.x + offsetX, p.y + offsetY, PLAYER_SIZE, PLAYER_SIZE);
 
+    const scoreData = scores.find(s => s.id === id);
+    const displayScore = scoreData ? scoreData.score : 0;
+
     ctx.fillStyle = '#fff';
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(`Touche: ${p.hits || 0}`, p.x + PLAYER_SIZE / 2 + offsetX, p.y - 5 + offsetY);
+    ctx.fillText(`Touche: ${displayScore}`, p.x + PLAYER_SIZE / 2 + offsetX, p.y - 5 + offsetY);
   }
 
   ctx.strokeStyle = 'rgba(255,255,255,0.2)';
   ctx.beginPath();
-  ctx.moveTo(canvas.width / 2, canvas.height / 2);
+  ctx.moveTo(canvas.width / 2 + PLAYER_SIZE / 2, canvas.height / 2 + PLAYER_SIZE / 2);
   ctx.lineTo(mouse.x, mouse.y);
   ctx.stroke();
 
   ctx.fillStyle = '#fff';
   for (const p of projectiles) {
+    ctx.fillStyle = p.color || '#fff';
     ctx.beginPath();
     ctx.arc(p.x + offsetX, p.y + offsetY, 4, 0, Math.PI * 2);
     ctx.fill();
+  }
+  // effets visuels
+  for (let i = effects.length - 1; i >= 0; i--) {
+    const e = effects[i];
+    ctx.beginPath();
+    ctx.arc(e.x + offsetX, e.y + offsetY, e.radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255,255,255,${e.alpha})`;
+    ctx.stroke();
+    e.radius += 1.5;
+    e.alpha -= 0.03;
+    if (e.radius > e.max || e.alpha <= 0) {
+      effects.splice(i, 1);
+    }
   }
 
   drawCooldown();
@@ -138,17 +187,15 @@ function update() {
     }
 
     for (const id in players) {
-      if (id !== p.from) {
-        const target = players[id];
+      const target = players[id];
+      const now = Date.now();
+      if (id !== p.from && (!target.invincibleUntil || now > target.invincibleUntil)) {
         const dist = Math.hypot(p.x - target.x, p.y - target.y);
-        if (dist < PLAYER_SIZE && (!target.invincibleUntil || now > target.invincibleUntil)) {
-          if (!p.hit) {
-            p.hit = true;
-            if (p.from && players[p.from]) {
-              players[p.from].hits = (players[p.from].hits || 0) + 1;
-            }
-            if (players[id].hits > 0) players[id].hits = 0;
-          }
+        if (dist < PLAYER_SIZE && !p.hit) {
+          p.hit = true;
+          socket.emit('hit', { targetId: id, shooterId: p.from });
+          projectiles.splice(i, 1);
+          break;
         }
       }
     }
@@ -204,6 +251,14 @@ function shootProjectile() {
   socket.emit('shoot', { roomId, projectile });
 }
 
+socket.on('projectileFired', (projectile) => {
+  projectiles.push(projectile);
+});
+
+socket.on('updateScores', (data) => {
+  scores = data;
+});
+
 socket.on('playerJoined', ({ id, color }) => {
   players[id] = { x: MAP_SIZE / 2, y: MAP_SIZE / 2, color, invincibleUntil: 0, hits: 0 };
 });
@@ -216,9 +271,14 @@ socket.on('playerMoved', ({ id, position }) => {
 
 socket.on('playerRespawn', ({ id }) => {
   if (!players[id]) return;
-  players[id].x = MAP_SIZE / 2;
-  players[id].y = MAP_SIZE / 2;
   players[id].invincibleUntil = Date.now() + INVINCIBLE_TIME;
+  effects.push({
+    x: players[id].x + PLAYER_SIZE / 2,
+    y: players[id].y + PLAYER_SIZE / 2,
+    radius: 5,
+    max: 30,
+    alpha: 1
+  });
 });
 
 socket.on('projectileFired', (projectile) => {
