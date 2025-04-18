@@ -221,7 +221,11 @@ io.on('connection', (socket) => {
     if (!player || !player.roomId) return;
 
     io.to(player.roomId).emit('dashEffect', {
-      ...effect,
+      fromX: effect.fromX,
+      fromY: effect.fromY,
+      toX: effect.toX,
+      toY: effect.toY,
+      color: player.color, // 🔐 couleur réelle du joueur
       id: socket.id
     });
   });

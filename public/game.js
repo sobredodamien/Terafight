@@ -141,7 +141,14 @@ function drawRoundTimer() {
     timerDiv.style.display = 'inline';
   }
 }
-
+function cssColorToRGB(color) {
+  const temp = document.createElement('div');
+  temp.style.color = color;
+  document.body.appendChild(temp);
+  const rgb = getComputedStyle(temp).color;
+  document.body.removeChild(temp);
+  return rgb.match(/\d+/g).slice(0, 3).join(','); // "255,0,0"
+}
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -231,9 +238,11 @@ function draw() {
   requestAnimationFrame(draw);
   dashEffects.forEach(e => {
     const alpha = e.life / 300;
-    const color = e.color || 'white';
-    ctx.strokeStyle = color.includes('rgba') ? color : `${color}66`;
-    ctx.lineWidth = 10;
+    const color = e.color || 'white'; // ← ajoute cette ligne
+    ctx.strokeStyle = color.startsWith('#')
+  ? color + Math.floor(alpha * 255).toString(16).padStart(2, '0')  // exemple : 'ff' → '00'
+  : `rgba(${cssColorToRGB(color)}, ${alpha.toFixed(2)})`;
+    ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.moveTo(e.fromX + offsetX, e.fromY + offsetY);
     ctx.lineTo(e.toX + offsetX, e.toY + offsetY);
@@ -506,6 +515,7 @@ document.addEventListener('keydown', (e) => {
       fromY: dashStartY,
       toX: dashEndX,
       toY: dashEndY,
+      color: myColor,
       life: 300
     });
     socket.emit('dashEffect', {
