@@ -6,6 +6,9 @@ let roundEnding = false;
 let nextRoundCountdown = 0;
 let winnerColor = null;
 
+let bonuses = []; // liste des bonus visibles sur la map
+let hasBonus = false; // est-ce que le joueur a un tir spécial ?
+
 const socket = io();
 let roomId = '';
 let effects = []; // pour stocker les explosions
@@ -103,6 +106,14 @@ function drawScores() {
     ctx.fillText(`${color}: ${score}`, canvas.width - 120, y);
     y += 18;
   });
+}
+function drawBonuses(offsetX, offsetY) {
+  for (const b of bonuses) {
+    ctx.fillStyle = 'yellow';
+    ctx.beginPath();
+    ctx.arc(b.x + offsetX, b.y + offsetY, 10, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 function drawRoundTimer() {
@@ -209,6 +220,7 @@ function draw() {
   }
   drawCooldown();
   drawScores();
+  drawBonuses(offsetX, offsetY);
   drawRoundTimer();
   requestAnimationFrame(draw);
 }
@@ -238,7 +250,7 @@ function update() {
     p.x += p.dx;
     p.y += p.dy;
 
-    if (p.x < 0 || p.x > MAP_SIZE || p.y < 0 || p.y > MAP_SIZE || collidesWall(p.x, p.y, 4)) {
+    if (p.x < 0 || p.x > MAP_SIZE || p.y < 0 || p.y > MAP_SIZE || (!p.bonus && collidesWall(p.x, p.y, p.radius))) {
       projectiles.splice(i, 1);
       continue;
     }
@@ -264,6 +276,16 @@ function update() {
     shootProjectile();
     lastShotTime = now;
   }
+  for (let i = bonuses.length - 1; i >= 0; i--) {
+    const b = bonuses[i];
+    const dist = Math.hypot(myPos.x + PLAYER_SIZE / 2 - b.x, myPos.y + PLAYER_SIZE / 2 - b.y);
+    if (dist < PLAYER_SIZE / 2 + 10) {
+      hasBonus = true;
+      socket.emit('bonusCollected', { id: b.id, roomId });
+      bonuses.splice(i, 1);
+    }
+  }
+
 }
 
 function gameLoop() {
@@ -294,16 +316,21 @@ function shootProjectile() {
   const dx = targetX - (myPos.x + PLAYER_SIZE / 2);
   const dy = targetY - (myPos.y + PLAYER_SIZE / 2);
   const len = Math.sqrt(dx * dx + dy * dy);
-  const unitX = (dx / len) * PROJECTILE_SPEED;
-  const unitY = (dy / len) * PROJECTILE_SPEED;
+  const speed = hasBonus ? 20 : PROJECTILE_SPEED;
+  const radius = hasBonus ? 10 : 4;
+  const unitX = (dx / len) * speed;
+  const unitY = (dy / len) * speed;
   const projectile = {
     x: myPos.x + PLAYER_SIZE / 2,
     y: myPos.y + PLAYER_SIZE / 2,
     dx: unitX,
     dy: unitY,
     color: myColor,
-    from: socket.id
+    from: socket.id,
+    radius: radius,
+    bonus: hasBonus
   };
+  hasBonus = false;
   projectiles.push(projectile);
   socket.emit('shoot', { roomId, projectile });
 }
@@ -410,4 +437,16 @@ socket.on('roundStart', () => {
   roundEnded = false;
   roundWinner = '';
   nextRoundIn = null;
+});
+
+socket.on('bonusSpawn', (bonus) => {
+  bonuses.push(bonus);
+});
+
+socket.on('bonusRemove', (id) => {
+  bonuses = bonuses.filter(b => b.id !== id);
+});
+
+socket.on('clearBonuses', () => {
+  bonuses = [];
 });

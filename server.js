@@ -5,13 +5,58 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+
 app.use(express.static('public'));
 
 let players = {}; // { socket.id: { roomId, color, score } }
-let rooms = {}; // { roomId: { inProgress, timeout, startTime } }
+let rooms = {};   // { roomId: { inProgress, timeout, startTime, bonusTimer, bonuses: [] } }
+
+const MAP_SIZE = 1024;
+const BONUS_INTERVAL = 30000;
 
 function getRoomPlayers(roomId) {
   return Object.entries(players).filter(([_, p]) => p.roomId === roomId);
+}
+
+function getRandomBonusPosition(walls) {
+  let tries = 0;
+  while (tries++ < 100) {
+    const x = Math.floor(Math.random() * (MAP_SIZE - 60)) + 30;
+    const y = Math.floor(Math.random() * (MAP_SIZE - 60)) + 30;
+    const collides = walls?.some(w => (
+      x + 10 > w.x && x < w.x + w.w &&
+      y + 10 > w.y && y < w.y + w.h
+    ));
+    if (!collides) return { x, y };
+  }
+  return null;
+}
+
+function startBonusSpawning(roomId) {
+  if (!rooms[roomId]) return;
+
+  // 🔒 Évite de créer plusieurs timers
+  if (rooms[roomId].bonusTimer) return;
+
+  rooms[roomId].bonuses = [];
+
+  rooms[roomId].bonusTimer = setInterval(() => {
+    const pos = getRandomBonusPosition([]);
+    if (pos) {
+      const bonus = { id: Date.now() + Math.random(), ...pos };
+      rooms[roomId].bonuses.push(bonus);
+      io.to(roomId).emit('bonusSpawn', bonus);
+    }
+  }, BONUS_INTERVAL);
+}
+
+function stopBonusSpawning(roomId) {
+  if (rooms[roomId]?.bonusTimer) {
+    clearInterval(rooms[roomId].bonusTimer);
+    rooms[roomId].bonusTimer = null;
+  }
+  rooms[roomId].bonuses = [];
+  io.to(roomId).emit('clearBonuses');
 }
 
 function startRound(roomId) {
@@ -26,10 +71,13 @@ function startRound(roomId) {
   io.to(roomId).emit('updateScores', getScores(players, roomId));
   io.to(roomId).emit('roundStart');
 
-  // timer 5 min
+  // bonus spawn
+  startBonusSpawning(roomId);
+
+  // timer 2m30
   rooms[roomId].timeout = setTimeout(() => {
     endRound(roomId, getWinner(roomId));
-  },2.5 * 60 * 1000);
+  }, 2.5 * 60 * 1000);
 }
 
 function endRound(roomId, winnerColor) {
@@ -37,14 +85,15 @@ function endRound(roomId, winnerColor) {
   rooms[roomId].inProgress = false;
   clearTimeout(rooms[roomId].timeout);
 
+  stopBonusSpawning(roomId);
+
   io.to(roomId).emit('roundEnd', { winnerColor });
 
-  // reset après 15 sec
   setTimeout(() => {
     if (getRoomPlayers(roomId).length >= 2) {
       startRound(roomId);
     }
-  }, 15 * 1000);
+  }, 15000);
 }
 
 function getWinner(roomId) {
@@ -76,7 +125,6 @@ io.on('connection', (socket) => {
 
     io.to(roomId).emit('updateScores', getScores(players, roomId));
 
-    // check démarrage round
     const nbPlayers = getRoomPlayers(roomId).length;
     if (nbPlayers >= 2 && (!rooms[roomId] || !rooms[roomId].inProgress)) {
       startRound(roomId);
@@ -105,10 +153,16 @@ io.on('connection', (socket) => {
       io.to(roomId).emit('playerRespawn', { id: targetId });
       io.to(roomId).emit('updateScores', getScores(players, roomId));
 
-      if (players[shooterId].score >= 3) {
+      if (players[shooterId].score >= 10) {
         endRound(roomId, players[shooterId].color);
       }
     }
+  });
+
+  socket.on('bonusCollected', ({ id, roomId }) => {
+    if (!rooms[roomId]) return;
+    rooms[roomId].bonuses = rooms[roomId].bonuses.filter(b => b.id !== id);
+    io.to(roomId).emit('bonusRemove', id);
   });
 
   socket.on('disconnect', () => {
@@ -123,6 +177,7 @@ io.on('connection', (socket) => {
         if (rooms[roomId]) {
           rooms[roomId].inProgress = false;
           clearTimeout(rooms[roomId].timeout);
+          stopBonusSpawning(roomId);
         }
       }
     }
