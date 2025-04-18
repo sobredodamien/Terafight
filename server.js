@@ -5,11 +5,11 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-
 app.use(express.static('public'));
 
 let players = {}; // { socket.id: { roomId, color, score } }
 let rooms = {};   // { roomId: { inProgress, timeout, startTime, bonusTimer, bonuses: [] } }
+let recentHits = []; // { shooterId, targetId, timestamp }
 
 const MAP_SIZE = 1024;
 const BONUS_INTERVAL = 30000;
@@ -143,6 +143,19 @@ io.on('connection', (socket) => {
     if (players[targetId] && players[shooterId]) {
       const roomId = players[shooterId].roomId;
       if (!rooms[roomId]?.inProgress) return;
+      const now = Date.now();
+      const duplicate = recentHits.find(h =>
+        h.shooterId === shooterId &&
+        h.targetId === targetId &&
+        now - h.timestamp < 300
+      );
+      if (duplicate) return; // déjà compté récemment
+
+      // Sinon, on compte ce hit
+      recentHits.push({ shooterId, targetId, timestamp: now });
+
+      // nettoyer les anciens hits
+      recentHits = recentHits.filter(h => now - h.timestamp < 300);
 
       players[shooterId].score += 1;
 
