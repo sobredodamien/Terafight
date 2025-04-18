@@ -17,6 +17,7 @@ let roomId = '';
 let effects = []; // pour stocker les explosions
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+let dashEffects = []; // [{ x, y, dx, dy, radius, life }]
 
 const MAP_SIZE = 1024;
 const PLAYER_SIZE = 20;
@@ -228,6 +229,16 @@ function draw() {
   drawBonuses(offsetX, offsetY);
   drawRoundTimer();
   requestAnimationFrame(draw);
+  dashEffects.forEach(e => {
+    const alpha = e.life / 300;
+    const color = e.color || 'white';
+    ctx.strokeStyle = color.includes('rgba') ? color : `${color}66`;
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.moveTo(e.fromX + offsetX, e.fromY + offsetY);
+    ctx.lineTo(e.toX + offsetX, e.toY + offsetY);
+    ctx.stroke();
+  });
 }
 
 function collidesWall(x, y, size = PLAYER_SIZE) {
@@ -253,6 +264,10 @@ function update() {
   let alreadyHit = new Set();
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
+    if (!p.from) {
+      projectiles.splice(i, 1);
+      continue;
+    }
     // si la vitesse est nulle = bug
     if (p.dx === 0 && p.dy === 0) {
       projectiles.splice(i, 1);
@@ -274,7 +289,7 @@ function update() {
     for (const id in players) {
       const target = players[id];
       const now = Date.now();
-      if (id !== p.from && (!target.invincibleUntil || now > target.invincibleUntil)) {
+      if (p.from && id !== p.from && (!target.invincibleUntil || now > target.invincibleUntil)) {
         const dist = Math.hypot(p.x - (target.x + PLAYER_SIZE / 2), p.y - (target.y + PLAYER_SIZE / 2));
         if (dist < PLAYER_SIZE / 2 + p.radius && !p.hit) {
           p.hit = true;
@@ -304,6 +319,14 @@ function update() {
       bonuses.splice(i, 1);
     }
   }
+  for (let i = dashEffects.length - 1; i >= 0; i--) {
+    const e = dashEffects[i];
+    e.x += e.dx;
+    e.y += e.dy;
+    e.radius += 1;
+    e.life -= 16;
+    if (e.life <= 0) dashEffects.splice(i, 1);
+  }
 }
 
 function gameLoop() {
@@ -312,14 +335,14 @@ function gameLoop() {
 }
 
 function joinRoom() {
+  document.getElementById('roomInput')?.blur();
   roomId = document.getElementById('roomInput').value;
+    if (!roomId) return;
 
-  // attend 100ms que usedColors se remplisse depuis updateScores
-  setTimeout(() => {
     let selectedColor = window.getSelectedColor();
     myColor = selectedColor;
 
-    if (roomId && !joined) {
+    if (!joined) {
       joined = true;
       myPos.x = MAP_SIZE / 2;
       myPos.y = MAP_SIZE / 2;
@@ -334,8 +357,14 @@ function joinRoom() {
       socket.emit('join', { roomId, color: myColor });
       draw();
       gameLoop();
+    } else {
+      // déjà dans la partie → juste mettre à jour la couleur
+      myColor = selectedColor;
+      if (players[socket.id]) {
+        players[socket.id].color = myColor;
+      }
+      socket.emit('colorChange', { roomId, color: myColor });
     }
-  }, 100); // ← délai léger pour que usedColors se remplisse
 }
 
 function shootProjectile() {
@@ -361,6 +390,7 @@ function shootProjectile() {
     radius: radius,
     bonus: hasBonus
   };
+  if (len === 0) return; // évite les tirs immobiles (vers soi-même)
   hasBonus = false;
   projectiles.push(projectile);
   socket.emit('shoot', { roomId, projectile });
@@ -381,6 +411,8 @@ function shootCone() {
   const baseAngle = Math.atan2(dy, dx);
 
   const angles = [-0.2, 0, 0.2]; // cône de 3 tirs
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len === 0) return; // évite le cône dans le vide
   for (const a of angles) {
     const angle = baseAngle + a;
     const speed = 10; // vitesse augmentée
@@ -450,15 +482,39 @@ document.addEventListener('keydown', (e) => {
     if (keys['s']) dy = 1;
     if (keys['a']) dx = -1;
     if (keys['d']) dx = 1;
+    const dashStartX = myPos.x + PLAYER_SIZE / 2;
+    const dashStartY = myPos.y + PLAYER_SIZE / 2;
     const nextX = myPos.x + dx * DASH_SPEED;
     const nextY = myPos.y + dy * DASH_SPEED;
     if (!collidesWall(nextX, myPos.y)) myPos.x = Math.max(0, Math.min(MAP_SIZE - PLAYER_SIZE, nextX));
     if (!collidesWall(myPos.x, nextY)) myPos.y = Math.max(0, Math.min(MAP_SIZE - PLAYER_SIZE, nextY));
+    
+    // 🛠️ mise à jour immédiate du modèle du joueur
+    players[socket.id].x = myPos.x;
+    players[socket.id].y = myPos.y;
+
     myPos.dashReady = false;
     myPos.lastDash = Date.now();
     setTimeout(() => {
       myPos.dashReady = true;
     }, DASH_COOLDOWN);
+    const dashEndX = myPos.x + PLAYER_SIZE / 2;
+    const dashEndY = myPos.y + PLAYER_SIZE / 2;
+
+    dashEffects.push({
+      fromX: dashStartX,
+      fromY: dashStartY,
+      toX: dashEndX,
+      toY: dashEndY,
+      life: 300
+    });
+    socket.emit('dashEffect', {
+      fromX: dashStartX,
+      fromY: dashStartY,
+      toX: dashEndX,
+      toY: dashEndY,
+      color: myColor
+    });
   }
 });
 
@@ -543,4 +599,24 @@ socket.on('colorAssigned', (assignedColor) => {
   if (players[socket.id]) {
     players[socket.id].color = assignedColor;
   }
+});
+
+socket.on('playerColorUpdated', ({ id, color }) => {
+  if (players[id]) {
+    players[id].color = color;
+  }
+});
+
+socket.on('dashEffect', ({ fromX, fromY, toX, toY, color, id }) => {
+  // ignore ton propre dash (déjà affiché localement)
+  if (id === socket.id) return;
+
+  dashEffects.push({
+    fromX,
+    fromY,
+    toX,
+    toY,
+    color,
+    life: 300
+  });
 });

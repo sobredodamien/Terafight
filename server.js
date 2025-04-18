@@ -127,14 +127,14 @@ io.on('connection', (socket) => {
 
     players[socket.id] = { roomId, color: assignedColor, score: 0 };
 
-    socket.to(roomId).emit('playerJoined', { id: socket.id, color });
+    socket.to(roomId).emit('playerJoined', { id: socket.id, color: assignedColor });
 
     for (const [id, data] of Object.entries(players)) {
       if (id !== socket.id && data.roomId === roomId) {
         socket.emit('playerJoined', { id, color: data.color });
-        socket.emit('colorAssigned', assignedColor);
       }
     }
+    socket.emit('colorAssigned', assignedColor);
 
     io.to(roomId).emit('updateScores', getScores(players, roomId));
 
@@ -191,6 +191,14 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('bonusRemove', id);
   });
 
+  socket.on('colorChange', ({ roomId, color }) => {
+    if (players[socket.id] && players[socket.id].roomId === roomId) {
+      players[socket.id].color = color;
+      io.to(roomId).emit('updateScores', getScores(players, roomId));
+      socket.to(roomId).emit('playerColorUpdated', { id: socket.id, color });
+    }
+  });
+
   socket.on('disconnect', () => {
     const data = players[socket.id];
     if (data) {
@@ -207,6 +215,15 @@ io.on('connection', (socket) => {
         }
       }
     }
+  });
+  socket.on('dashEffect', (effect) => {
+    const player = players[socket.id];
+    if (!player || !player.roomId) return;
+
+    io.to(player.roomId).emit('dashEffect', {
+      ...effect,
+      id: socket.id
+    });
   });
 });
 
