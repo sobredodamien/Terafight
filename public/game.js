@@ -6,6 +6,9 @@ let roundEnding = false;
 let nextRoundCountdown = 0;
 let winnerColor = null;
 
+let lastConeShot = 0;
+const CONE_COOLDOWN = 2000;
+
 let bonuses = []; // liste des bonus visibles sur la map
 let hasBonus = false; // est-ce que le joueur a un tir spécial ?
 
@@ -149,7 +152,6 @@ function draw() {
   for (const wall of walls) {
     ctx.fillRect(wall.x + offsetX, wall.y + offsetY, wall.w, wall.h);
   }
-
   for (const id in players) {
     const p = players[id];
     ctx.fillStyle = p.invincibleUntil && Date.now() < p.invincibleUntil ? 'gray' : p.color || 'red';
@@ -245,8 +247,14 @@ function update() {
   players[socket.id].y = myPos.y;
 
   const now = Date.now();
+  let alreadyHit = new Set();
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
+    if (!p.spawnTime) p.spawnTime = Date.now();
+    if (Date.now() - p.spawnTime > (p.lifespan || 999999)) {
+      projectiles.splice(i, 1);
+      continue;
+    }
     p.x += p.dx;
     p.y += p.dy;
 
@@ -262,7 +270,10 @@ function update() {
         const dist = Math.hypot(p.x - target.x, p.y - target.y);
         if (dist < PLAYER_SIZE && !p.hit) {
           p.hit = true;
-          socket.emit('hit', { targetId: id, shooterId: p.from });
+          if (!alreadyHit.has(p.from)) {
+            socket.emit('hit', { targetId: id, shooterId: p.from });
+            alreadyHit.add(p.from);
+          }
           projectiles.splice(i, 1);
           break;
         }
@@ -309,6 +320,7 @@ function joinRoom() {
 }
 
 function shootProjectile() {
+  if (lastConeShot && Date.now() - lastConeShot < 50) return;
   const offsetX = canvas.width / 2 - myPos.x;
   const offsetY = canvas.height / 2 - myPos.y;
   const targetX = mouse.x - offsetX;
@@ -333,6 +345,39 @@ function shootProjectile() {
   hasBonus = false;
   projectiles.push(projectile);
   socket.emit('shoot', { roomId, projectile });
+}
+
+function shootCone() {
+  const now = Date.now();
+  if (now - lastConeShot < CONE_COOLDOWN) return;
+  lastConeShot = now;
+
+  const offsetX = canvas.width / 2 - myPos.x;
+  const offsetY = canvas.height / 2 - myPos.y;
+  const targetX = mouse.x - offsetX;
+  const targetY = mouse.y - offsetY;
+
+  const dx = targetX - (myPos.x + PLAYER_SIZE / 2);
+  const dy = targetY - (myPos.y + PLAYER_SIZE / 2);
+  const baseAngle = Math.atan2(dy, dx);
+
+  const angles = [-0.2, 0, 0.2]; // cône de 3 tirs
+  for (const a of angles) {
+    const angle = baseAngle + a;
+    const projectile = {
+      x: myPos.x + PLAYER_SIZE / 2,
+      y: myPos.y + PLAYER_SIZE / 2,
+      dx: Math.cos(angle) * 6,
+      dy: Math.sin(angle) * 6,
+      color: myColor,
+      from: socket.id,
+      radius: 4,
+      bonus: false,
+      lifespan: 400 // durée de vie en ms
+    };
+    projectiles.push(projectile);
+    socket.emit('shoot', { roomId, projectile });
+  }
 }
 
 socket.on('projectileFired', (projectile) => {
@@ -410,6 +455,23 @@ canvas.addEventListener('mousemove', (e) => {
 
 canvas.addEventListener('mousedown', () => {
   mouseDown = true;
+});
+
+canvas.addEventListener('mouseup', () => {
+  mouseDown = false;
+});
+
+canvas.addEventListener('contextmenu', e => e.preventDefault()); // bloque clic droit
+
+canvas.addEventListener('mousedown', (e) => {
+  if (!joined) return;
+
+  if (e.button === 2) {
+    shootCone(); // tir spécial
+    mouseDown = false; // ← empêche tir automatique derrière
+  } else if (e.button === 0) {
+    mouseDown = true;
+  }
 });
 
 canvas.addEventListener('mouseup', () => {
