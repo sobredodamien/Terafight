@@ -113,13 +113,26 @@ io.on('connection', (socket) => {
 
   socket.on('join', ({ roomId, color }) => {
     socket.join(roomId);
-    players[socket.id] = { roomId, color, score: 0 };
+    // vérifier si couleur déjà prise
+    const takenColors = Object.values(players)
+      .filter(p => p.roomId === roomId)
+      .map(p => p.color);
+
+    let assignedColor = color;
+    if (takenColors.includes(color)) {
+      const fallback = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'cyan', 'magenta']
+        .find(c => !takenColors.includes(c));
+      assignedColor = fallback || 'gray';
+    }
+
+    players[socket.id] = { roomId, color: assignedColor, score: 0 };
 
     socket.to(roomId).emit('playerJoined', { id: socket.id, color });
 
     for (const [id, data] of Object.entries(players)) {
       if (id !== socket.id && data.roomId === roomId) {
         socket.emit('playerJoined', { id, color: data.color });
+        socket.emit('colorAssigned', assignedColor);
       }
     }
 

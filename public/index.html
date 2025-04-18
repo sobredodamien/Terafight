@@ -62,6 +62,7 @@
       display: block;
     }
   </style>
+
 </head>
 <body>
   <div id="menu">
@@ -77,6 +78,15 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="game.js"></script>
   <script>
+      const roomInput = document.getElementById('roomInput');
+      const joinBtn = document.getElementById('joinBtn');
+
+      roomInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          joinBtn?.click();
+        }
+      });
+    
     const colors = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'cyan', 'magenta'];
     const colorPicker = document.getElementById('colorPicker');
     let selectedColor = colors[0];

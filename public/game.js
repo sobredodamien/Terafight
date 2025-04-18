@@ -103,8 +103,11 @@ function drawCooldown() {
 
 function drawScores() {
   ctx.font = '14px sans-serif';
-  let y = 20;
-  scores.forEach(({ color, score }) => {
+  let y = 70;
+
+  const sorted = [...scores].sort((a, b) => b.score - a.score);
+
+  sorted.forEach(({ color, score }) => {
     ctx.fillStyle = color;
     ctx.fillText(`${color}: ${score}`, canvas.width - 120, y);
     y += 18;
@@ -250,6 +253,11 @@ function update() {
   let alreadyHit = new Set();
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
+    // si la vitesse est nulle = bug
+    if (p.dx === 0 && p.dy === 0) {
+      projectiles.splice(i, 1);
+      continue;
+    }
     if (!p.spawnTime) p.spawnTime = Date.now();
     if (Date.now() - p.spawnTime > (p.lifespan || 999999)) {
       projectiles.splice(i, 1);
@@ -267,8 +275,8 @@ function update() {
       const target = players[id];
       const now = Date.now();
       if (id !== p.from && (!target.invincibleUntil || now > target.invincibleUntil)) {
-        const dist = Math.hypot(p.x - target.x, p.y - target.y);
-        if (dist < PLAYER_SIZE && !p.hit) {
+        const dist = Math.hypot(p.x - (target.x + PLAYER_SIZE / 2), p.y - (target.y + PLAYER_SIZE / 2));
+        if (dist < PLAYER_SIZE / 2 + p.radius && !p.hit) {
           p.hit = true;
           if (!alreadyHit.has(p.from)) {
             socket.emit('hit', { targetId: id, shooterId: p.from });
@@ -296,7 +304,6 @@ function update() {
       bonuses.splice(i, 1);
     }
   }
-
 }
 
 function gameLoop() {
@@ -306,17 +313,29 @@ function gameLoop() {
 
 function joinRoom() {
   roomId = document.getElementById('roomInput').value;
-  myColor = window.getSelectedColor();
-  if (roomId && !joined) {
-    joined = true;
-    myPos.x = MAP_SIZE / 2;
-    myPos.y = MAP_SIZE / 2;
-    myPos.invincibleUntil = Date.now() + INVINCIBLE_TIME;
-    players[socket.id] = { x: myPos.x, y: myPos.y, color: myColor, invincibleUntil: myPos.invincibleUntil, hits: 0 };
-    socket.emit('join', { roomId, color: myColor });
-    draw();
-    gameLoop();
-  }
+
+  // attend 100ms que usedColors se remplisse depuis updateScores
+  setTimeout(() => {
+    let selectedColor = window.getSelectedColor();
+    myColor = selectedColor;
+
+    if (roomId && !joined) {
+      joined = true;
+      myPos.x = MAP_SIZE / 2;
+      myPos.y = MAP_SIZE / 2;
+      myPos.invincibleUntil = Date.now() + INVINCIBLE_TIME;
+      players[socket.id] = {
+        x: myPos.x,
+        y: myPos.y,
+        color: myColor,
+        invincibleUntil: myPos.invincibleUntil,
+        hits: 0
+      };
+      socket.emit('join', { roomId, color: myColor });
+      draw();
+      gameLoop();
+    }
+  }, 100); // ← délai léger pour que usedColors se remplisse
 }
 
 function shootProjectile() {
@@ -364,16 +383,18 @@ function shootCone() {
   const angles = [-0.2, 0, 0.2]; // cône de 3 tirs
   for (const a of angles) {
     const angle = baseAngle + a;
+    const speed = 10; // vitesse augmentée
+    const lifetime = 240; // durée réduite (même distance que 6px x 400ms)
     const projectile = {
       x: myPos.x + PLAYER_SIZE / 2,
       y: myPos.y + PLAYER_SIZE / 2,
-      dx: Math.cos(angle) * 6,
-      dy: Math.sin(angle) * 6,
+      dx: Math.cos(angle) * speed,
+      dy: Math.sin(angle) * speed,
       color: myColor,
       from: socket.id,
       radius: 4,
       bonus: false,
-      lifespan: 400 // durée de vie en ms
+      lifespan: lifetime
     };
     projectiles.push(projectile);
     socket.emit('shoot', { roomId, projectile });
@@ -390,6 +411,7 @@ socket.on('updateScores', (data) => {
 
 socket.on('playerJoined', ({ id, color }) => {
   players[id] = { x: MAP_SIZE / 2, y: MAP_SIZE / 2, color, invincibleUntil: 0, hits: 0 };
+  usedColors.add(color); // ← enregistre la couleur utilisée
 });
 
 socket.on('playerMoved', ({ id, position }) => {
@@ -412,10 +434,6 @@ socket.on('playerRespawn', ({ id }) => {
 
 socket.on('projectileFired', (projectile) => {
   projectiles.push(projectile);
-});
-
-socket.on('updateScores', (data) => {
-  scores = data;
 });
 
 socket.on('playerLeft', (id) => {
@@ -511,4 +529,18 @@ socket.on('bonusRemove', (id) => {
 
 socket.on('clearBonuses', () => {
   bonuses = [];
+});
+socket.on('colorAssigned', (assignedColor) => {
+  myColor = assignedColor;
+
+  // met à jour visuellement la sélection
+  document.querySelectorAll('.color').forEach(div => {
+    if (div.dataset.color === assignedColor) div.classList.add('selected');
+    else div.classList.remove('selected');
+  });
+
+  // 🔧 met aussi à jour la couleur de ton propre joueur dans players
+  if (players[socket.id]) {
+    players[socket.id].color = assignedColor;
+  }
 });
