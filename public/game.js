@@ -1,6 +1,11 @@
 // === Frontend JS ===
 // Fichier : public/game.js
 
+let roundActive = false;
+let roundEnding = false;
+let nextRoundCountdown = 0;
+let winnerColor = null;
+
 const socket = io();
 let roomId = '';
 let effects = []; // pour stocker les explosions
@@ -73,6 +78,11 @@ let myPos = {
   invincibleUntil: 0
 };
 
+let roundStartTime = null;
+let roundEnded = false;
+let roundWinner = '';
+let nextRoundIn = null;
+
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
@@ -93,6 +103,25 @@ function drawScores() {
     ctx.fillText(`${color}: ${score}`, canvas.width - 120, y);
     y += 18;
   });
+}
+
+function drawRoundTimer() {
+  if (!roundStartTime || roundEnded) return;
+  const now = Date.now();
+  const elapsed = Math.floor((now - roundStartTime) / 1000);
+  const remaining = Math.max(0, 150 - elapsed);
+  const min = Math.floor(remaining / 60);
+  const sec = String(remaining % 60).padStart(2, '0');
+  ctx.fillStyle = '#fff';
+  ctx.font = '16px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(`Temps : ${min}:${sec}`, canvas.width - 20, 40);
+  ctx.textAlign = 'left'; 
+  const timerDiv = document.getElementById('roundTimer');
+  if (timerDiv) {
+    timerDiv.textContent = `Temps : ${min}:${sec}`;
+    timerDiv.style.display = 'inline';
+  }
 }
 
 function draw() {
@@ -150,9 +179,37 @@ function draw() {
       effects.splice(i, 1);
     }
   }
+  if (roundEnding) {
+    const boxWidth = 420;
+    const boxHeight = 120;
+    const centerX = canvas.width / 2 - boxWidth / 2;
+    const centerY = canvas.height / 2 - boxHeight / 2;
 
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(centerX, centerY, boxWidth, boxHeight);
+
+    ctx.textAlign = 'center';
+    ctx.font = '30px sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = 'black';
+    ctx.shadowBlur = 4;
+    ctx.fillText(`Fin du round !`, canvas.width / 2, canvas.height / 2 - 30);
+
+    ctx.font = '22px sans-serif';
+    ctx.fillStyle = winnerColor || '#ccc';
+    ctx.fillText(`Gagnant : ${winnerColor || '-'}`, canvas.width / 2, canvas.height / 2);
+
+    ctx.fillStyle = '#fff';
+    if (nextRoundCountdown > 0) {
+      ctx.font = '18px sans-serif';
+      ctx.fillText(`Prochain round dans ${nextRoundCountdown}s`, canvas.width / 2, canvas.height / 2 + 30);
+    }
+
+    ctx.shadowBlur = 0;
+  }
   drawCooldown();
   drawScores();
+  drawRoundTimer();
   requestAnimationFrame(draw);
 }
 
@@ -330,4 +387,27 @@ canvas.addEventListener('mousedown', () => {
 
 canvas.addEventListener('mouseup', () => {
   mouseDown = false;
+});
+
+socket.on('roundEnd', ({ winnerColor: color }) => {
+  roundActive = false;
+  roundEnding = true;
+  winnerColor = color;
+  nextRoundCountdown = 15;
+  const timerDiv = document.getElementById('roundTimer');
+  if (timerDiv) timerDiv.style.display = 'none';
+  const countdownInterval = setInterval(() => {
+    nextRoundCountdown--;
+    if (nextRoundCountdown <= 0) {
+      clearInterval(countdownInterval);
+      roundEnding = false;
+    }
+  }, 1000);
+});
+
+socket.on('roundStart', () => {
+  roundStartTime = Date.now();
+  roundEnded = false;
+  roundWinner = '';
+  nextRoundIn = null;
 });
