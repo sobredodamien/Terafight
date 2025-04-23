@@ -93,6 +93,27 @@ let nextRoundIn = null;
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
+const soundNormal = document.getElementById('soundNormal');
+const soundTriple = document.getElementById('soundTriple');
+const soundSniper = document.getElementById('soundSniper');
+const soundDash = document.getElementById('soundDash');
+const soundRespawn = document.getElementById('soundRespawn');
+const soundHit = document.getElementById('soundHit');
+
+  function translateColor(color) {
+    const map = {
+      red: 'Rouge',
+      blue: 'Bleu',
+      green: 'Vert',
+      yellow: 'Jaune',
+      orange: 'Orange',
+      purple: 'Violet',
+      cyan: 'Cyan',
+      magenta: 'Rose'
+    };
+    return map[color] || color;
+  }
+
 function drawCooldown() {
   const now = Date.now();
   const delta = Math.max(0, DASH_COOLDOWN - (now - myPos.lastDash));
@@ -103,15 +124,31 @@ function drawCooldown() {
 }
 
 function drawScores() {
-  ctx.font = '14px sans-serif';
-  let y = 70;
+  const scoreboard = document.getElementById('scoreboard');
+  if (!scoreboard) return;
 
   const sorted = [...scores].sort((a, b) => b.score - a.score);
 
-  sorted.forEach(({ color, score }) => {
-    ctx.fillStyle = color;
-    ctx.fillText(`${color}: ${score}`, canvas.width - 120, y);
-    y += 18;
+  const existingTimer = document.getElementById('roundTimer');
+  scoreboard.innerHTML = '';
+  if (existingTimer) scoreboard.appendChild(existingTimer);
+
+  const title = document.createElement('div');
+  title.innerHTML = '<strong style="font-size: 16px;">Scores</strong></br>';
+  title.style.marginTop = '8px';
+  scoreboard.appendChild(title);
+
+  sorted.forEach(({ color, score }, i) => {
+    const label = translateColor(color);
+    scoreboard.innerHTML += `
+      <div class="score-entry" style="margin-top: ${i === 0 ? '8px' : '0'};">
+        <div style="display: flex; align-items: center;">
+          <div class="score-color" style="background: ${color}"></div>
+          <span>${label}</span>
+        </div>
+        <span style="margin-left: 6px;">${score}</span>
+      </div>
+    `;
   });
 }
 function drawBonuses(offsetX, offsetY) {
@@ -231,6 +268,7 @@ function draw() {
 
     ctx.shadowBlur = 0;
   }
+
   drawCooldown();
   drawScores();
   drawBonuses(offsetX, offsetY);
@@ -302,6 +340,9 @@ function update() {
         const dist = Math.hypot(p.x - (target.x + PLAYER_SIZE / 2), p.y - (target.y + PLAYER_SIZE / 2));
         if (dist < PLAYER_SIZE / 2 + p.radius && !p.hit) {
           p.hit = true;
+          soundHit.currentTime = 0;
+          soundHit.play().catch(() => {});
+
           if (!alreadyHit.has(p.from)) {
             socket.emit('hit', { targetId: id, shooterId: p.from });
             alreadyHit.add(p.from);
@@ -364,6 +405,8 @@ function joinRoom() {
         hits: 0
       };
       socket.emit('join', { roomId, color: myColor });
+      soundRespawn.currentTime = 0;
+      soundRespawn.play().catch(() => {});
       draw();
       gameLoop();
     } else {
@@ -402,6 +445,14 @@ function shootProjectile() {
   if (len === 0) return; // évite les tirs immobiles (vers soi-même)
   hasBonus = false;
   projectiles.push(projectile);
+
+  if (projectile.bonus) {
+    soundSniper.currentTime = 0;
+    soundSniper.play().catch(() => {});
+  } else {
+    soundNormal.currentTime = 0;
+    soundNormal.play().catch(() => {});
+  }
   socket.emit('shoot', { roomId, projectile });
 }
 
@@ -437,6 +488,8 @@ function shootCone() {
       bonus: false,
       lifespan: lifetime
     };
+    soundTriple.currentTime = 0;
+    soundTriple.play().catch(() => {});
     projectiles.push(projectile);
     socket.emit('shoot', { roomId, projectile });
   }
@@ -452,7 +505,6 @@ socket.on('updateScores', (data) => {
 
 socket.on('playerJoined', ({ id, color }) => {
   players[id] = { x: MAP_SIZE / 2, y: MAP_SIZE / 2, color, invincibleUntil: 0, hits: 0 };
-  usedColors.add(color); // ← enregistre la couleur utilisée
 });
 
 socket.on('playerMoved', ({ id, position }) => {
@@ -518,6 +570,8 @@ document.addEventListener('keydown', (e) => {
       color: myColor,
       life: 300
     });
+    soundDash.currentTime = 0;
+    soundDash.play().catch(() => {});
     socket.emit('dashEffect', {
       fromX: dashStartX,
       fromY: dashStartY,
@@ -576,6 +630,8 @@ socket.on('roundEnd', ({ winnerColor: color }) => {
       roundEnding = false;
     }
   }, 1000);
+  const music = document.getElementById('bgMusic');
+  if (music) music.pause();
 });
 
 socket.on('roundStart', () => {
@@ -583,6 +639,11 @@ socket.on('roundStart', () => {
   roundEnded = false;
   roundWinner = '';
   nextRoundIn = null;
+  const music = document.getElementById('bgMusic');
+  if (music && music.paused) {
+    music.currentTime = 0;
+    music.play().catch(() => {}); // ignore l'erreur si autoplay est bloqué
+  }
 });
 
 socket.on('bonusSpawn', (bonus) => {
@@ -629,4 +690,18 @@ socket.on('dashEffect', ({ fromX, fromY, toX, toY, color, id }) => {
     color,
     life: 300
   });
+});
+
+socket.on('playerJoinedSound', () => {
+  soundRespawn.currentTime = 0;
+  soundRespawn.play().catch(() => {});
+});
+socket.on('playerDashed', () => {
+  soundDash.currentTime = 0;
+  soundDash.play().catch(() => {});
+});
+
+socket.on('sniperFired', () => {
+  soundSniper.currentTime = 0;
+  soundSniper.play().catch(() => {});
 });

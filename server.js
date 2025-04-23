@@ -128,6 +128,7 @@ io.on('connection', (socket) => {
     players[socket.id] = { roomId, color: assignedColor, score: 0 };
 
     socket.to(roomId).emit('playerJoined', { id: socket.id, color: assignedColor });
+    socket.to(roomId).emit('playerJoinedSound');
 
     for (const [id, data] of Object.entries(players)) {
       if (id !== socket.id && data.roomId === roomId) {
@@ -150,6 +151,10 @@ io.on('connection', (socket) => {
 
   socket.on('shoot', ({ roomId, projectile }) => {
     socket.to(roomId).emit('projectileFired', projectile);
+
+    if (projectile.bonus) {
+      socket.to(roomId).emit('sniperFired');
+    }
   });
 
   socket.on('hit', ({ targetId, shooterId }) => {
@@ -228,6 +233,7 @@ io.on('connection', (socket) => {
       color: player.color, // 🔐 couleur réelle du joueur
       id: socket.id
     });
+    socket.to(player.roomId).emit('playerDashed');
   });
 });
 

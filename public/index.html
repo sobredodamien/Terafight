@@ -61,20 +61,104 @@
     canvas {
       display: block;
     }
-  </style>
+    <style>
+    #volumeControls button {
+      background: #444;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 5px;
+      cursor: pointer;
+    }
+    #volumeControls button:hover {
+      background: #666;
+    }
+    #volumeSlider {
+      -webkit-appearance: none;
+      background: transparent;
+      width: 100px;
+      height: 4px;
+    }
 
+    #volumeSlider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 12px;
+      width: 12px;
+      border-radius: 50%;
+      background: white;
+      cursor: pointer;
+      margin-top: -4px;
+    }
+
+    #volumeSlider::-moz-range-thumb {
+      height: 12px;
+      width: 12px;
+      border-radius: 50%;
+      background: white;
+      cursor: pointer;
+    }
+
+    #volumeSlider::-webkit-slider-runnable-track {
+      height: 4px;
+      background: #08c;
+      border-radius: 2px;
+    }
+
+    #volumeSlider::-moz-range-track {
+      height: 4px;
+      background: #08c;
+      border-radius: 2px;
+    }
+    #scoreboard {
+      position: absolute;
+      top: 60px;
+      right: 20px;
+      background: #2a2a2a;
+      color: white;
+      padding: 12px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-family: sans-serif;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+      z-index: 10;
+      min-width: 150px;
+    }
+    .score-entry {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .score-color {
+      width: 14px;
+      height: 14px;
+      border-radius: 2px;
+      margin-right: 8px;
+    }
+  </style>
 </head>
 <body>
   <div id="menu">
     <input id="roomInput" placeholder="Code de la partie">
     <div id="colorPicker"></div>
     <button id="joinBtn" onclick="joinRoom()">Rejoindre</button>
-    <span id="roundTimer" style="color: white; font-size: 16px; margin-left: 10px; display: none;">
-      Temps : 0:00
-    </span>
+    <div id="volumeControls" style="display: flex; align-items: center; gap: 6px;">
+      <button id="muteBtn">🔊</button>
+      <input id="volumeSlider" type="range" min="0" max="1" step="0.01" value="1" style="width: 100px;">
+    </div>
   </div>
-  <canvas id="gameCanvas"></canvas>
+  <audio id="bgMusic" src="Dikimacousse2.mp3" preload="auto" loop></audio>
+  <audio id="soundNormal" src="shot_normal.mp3" preload="auto"></audio>
+  <audio id="soundTriple" src="shot_triple.mp3" preload="auto"></audio>
+  <audio id="soundSniper" src="shot_sniper.mp3" preload="auto"></audio>
+  <audio id="soundDash" src="dash.mp3" preload="auto"></audio>
+  <audio id="soundRespawn" src="respawn.mp3" preload="auto"></audio>
+  <audio id="soundHit" src="hit.mp3" preload="auto"></audio>
 
+  <canvas id="gameCanvas"></canvas>
+  <div id="scoreboard">
+    <div id="roundTimer" style="font-size: 16px; margin-bottom: 10px;">Temps : 0:00</div>
+  </div>
   <script src="/socket.io/socket.io.js"></script>
   <script src="game.js"></script>
   <script>
@@ -105,6 +189,21 @@
     });
 
     window.getSelectedColor = () => selectedColor;
+    const music = document.getElementById('bgMusic');
+    const muteBtn = document.getElementById('muteBtn');
+    const volumeSlider = document.getElementById('volumeSlider');
+
+    muteBtn.onclick = () => {
+      music.muted = !music.muted;
+      muteBtn.textContent = music.muted ? '🔇' : '🔊';
+    };
+    volumeSlider.oninput = (e) => {
+      let v = parseFloat(e.target.value);
+      if (v < 0.01) v = 0;
+      if (v > 0.99) v = 1;
+      music.volume = v;
+    };
+
   </script>
 </body>
 </html>
