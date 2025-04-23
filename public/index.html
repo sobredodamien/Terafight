@@ -60,8 +60,8 @@
     }
     canvas {
       display: block;
+      cursor: crosshair;
     }
-    <style>
     #volumeControls button {
       background: #444;
       color: white;
@@ -74,40 +74,39 @@
       background: #666;
     }
     #volumeSlider {
+      appearance: none;
       -webkit-appearance: none;
-      background: transparent;
       width: 100px;
-      height: 4px;
-    }
-
-    #volumeSlider::-webkit-slider-thumb {
-      -webkit-appearance: none;
       height: 12px;
-      width: 12px;
-      border-radius: 50%;
-      background: white;
-      cursor: pointer;
-      margin-top: -4px;
+      background: transparent;
+      border: none;
+      padding: 0;
+      margin: 0;
     }
-
-    #volumeSlider::-moz-range-thumb {
-      height: 12px;
-      width: 12px;
-      border-radius: 50%;
-      background: white;
-      cursor: pointer;
-    }
-
     #volumeSlider::-webkit-slider-runnable-track {
       height: 4px;
-      background: #08c;
-      border-radius: 2px;
+      background: transparent;
+      border: none;
     }
-
     #volumeSlider::-moz-range-track {
+      background: transparent;
       height: 4px;
-      background: #08c;
-      border-radius: 2px;
+      border: none;
+    }
+    #volumeSlider::-moz-range-track {
+      background: transparent;
+      height: 4px;
+    }
+    #volumeSlider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 0;
+      height: 0;
+      border: none;
+    }
+    #volumeSlider::-moz-range-thumb {
+      width: 0;
+      height: 0;
+      border: none;
     }
     #scoreboard {
       position: absolute;
@@ -135,6 +134,7 @@
       border-radius: 2px;
       margin-right: 8px;
     }
+
   </style>
 </head>
 <body>
@@ -192,6 +192,7 @@
     const music = document.getElementById('bgMusic');
     const muteBtn = document.getElementById('muteBtn');
     const volumeSlider = document.getElementById('volumeSlider');
+    updateVolumeSliderStyle(volumeSlider);
 
     muteBtn.onclick = () => {
       music.muted = !music.muted;
@@ -202,8 +203,13 @@
       if (v < 0.01) v = 0;
       if (v > 0.99) v = 1;
       music.volume = v;
+      // Met à jour le style du slider
+      updateVolumeSliderStyle(volumeSlider);
     };
-
+    function updateVolumeSliderStyle(slider) {
+      const value = parseFloat(slider.value) * 100;
+      slider.style.background = `linear-gradient(to right, #08c ${value}%, #444 ${value}%)`;
+    }
   </script>
 </body>
 </html>

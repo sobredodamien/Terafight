@@ -178,10 +178,11 @@ io.on('connection', (socket) => {
       players[shooterId].score += 1;
 
       if (players[targetId].score > 0) {
-        players[targetId].score = 0;
+        players[targetId].score = Math.max(0, players[targetId].score - 2);
       }
 
       io.to(roomId).emit('playerRespawn', { id: targetId });
+      io.to(targetId).emit('youGotHit');
       io.to(roomId).emit('updateScores', getScores(players, roomId));
 
       if (players[shooterId].score >= 10) {

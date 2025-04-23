@@ -12,6 +12,9 @@ const CONE_COOLDOWN = 2000;
 let bonuses = []; // liste des bonus visibles sur la map
 let hasBonus = false; // est-ce que le joueur a un tir spécial ?
 
+let rightMouseDown = false;
+let lastConeShotTime = 0;
+
 const socket = io();
 let roomId = '';
 let effects = []; // pour stocker les explosions
@@ -242,9 +245,9 @@ function draw() {
   }
   if (roundEnding) {
     const boxWidth = 420;
-    const boxHeight = 120;
+    const boxHeight = 280;
     const centerX = canvas.width / 2 - boxWidth / 2;
-    const centerY = canvas.height / 2 - boxHeight / 2;
+    const centerY = canvas.height / 3 - boxHeight / 2;
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
     ctx.fillRect(centerX, centerY, boxWidth, boxHeight);
@@ -254,16 +257,17 @@ function draw() {
     ctx.fillStyle = '#fff';
     ctx.shadowColor = 'black';
     ctx.shadowBlur = 4;
-    ctx.fillText(`Fin du round !`, canvas.width / 2, canvas.height / 2 - 30);
+    const textY = canvas.height / 3 + 5; 
+    ctx.fillText(`Fin du round !`, canvas.width / 2, textY);
 
     ctx.font = '22px sans-serif';
     ctx.fillStyle = winnerColor || '#ccc';
-    ctx.fillText(`Gagnant : ${winnerColor || '-'}`, canvas.width / 2, canvas.height / 2);
+    ctx.fillText(`Gagnant : ${winnerColor || '-'}`, canvas.width / 2, textY + 25);
 
     ctx.fillStyle = '#fff';
     if (nextRoundCountdown > 0) {
       ctx.font = '18px sans-serif';
-      ctx.fillText(`Prochain round dans ${nextRoundCountdown}s`, canvas.width / 2, canvas.height / 2 + 30);
+      ctx.fillText(`Prochain round dans ${nextRoundCountdown}s`, canvas.width / 2, textY + 50);
     }
 
     ctx.shadowBlur = 0;
@@ -356,9 +360,22 @@ function update() {
 
   socket.emit('move', { roomId, position: { x: myPos.x, y: myPos.y } });
 
-  if (mouseDown && now - lastShotTime > SHOOT_COOLDOWN) {
+  if (
+    mouseDown &&
+    !rightMouseDown && // ← Empêche de tirer si clic droit maintenu
+    now - lastShotTime > SHOOT_COOLDOWN &&
+    (!myPos.invincibleUntil || Date.now() >= myPos.invincibleUntil)
+  ) {
     shootProjectile();
     lastShotTime = now;
+  }
+  if (
+    rightMouseDown &&
+    Date.now() - lastConeShotTime > CONE_COOLDOWN &&
+    (!myPos.invincibleUntil || Date.now() >= myPos.invincibleUntil)
+  ) {
+    shootCone();
+    lastConeShotTime = Date.now();
   }
   for (let i = bonuses.length - 1; i >= 0; i--) {
     const b = bonuses[i];
@@ -421,6 +438,9 @@ function joinRoom() {
 
 function shootProjectile() {
   if (lastConeShot && Date.now() - lastConeShot < 50) return;
+
+  // 🛡️ Ne pas tirer pendant l'invincibilité
+  if (myPos.invincibleUntil && Date.now() < myPos.invincibleUntil) return;
   const offsetX = canvas.width / 2 - myPos.x;
   const offsetY = canvas.height / 2 - myPos.y;
   const targetX = mouse.x - offsetX;
@@ -458,8 +478,8 @@ function shootProjectile() {
 
 function shootCone() {
   const now = Date.now();
-  if (now - lastConeShot < CONE_COOLDOWN) return;
-  lastConeShot = now;
+  // 🛡️ Ne pas tirer pendant l'invincibilité
+  if (myPos.invincibleUntil && Date.now() < myPos.invincibleUntil) return;
 
   const offsetX = canvas.width / 2 - myPos.x;
   const offsetY = canvas.height / 2 - myPos.y;
@@ -495,6 +515,12 @@ function shootCone() {
   }
 }
 
+function updateVolumeSliderStyle(slider) {
+  const value = parseFloat(slider.value) * 100;
+  slider.style.background = `linear-gradient(to right, #08c ${value}%, #444 ${value}%)`;
+}
+
+
 socket.on('projectileFired', (projectile) => {
   projectiles.push(projectile);
 });
@@ -516,6 +542,9 @@ socket.on('playerMoved', ({ id, position }) => {
 socket.on('playerRespawn', ({ id }) => {
   if (!players[id]) return;
   players[id].invincibleUntil = Date.now() + INVINCIBLE_TIME;
+  if (id === socket.id) {
+    myPos.invincibleUntil = Date.now() + INVINCIBLE_TIME;
+  }
   effects.push({
     x: players[id].x + PLAYER_SIZE / 2,
     y: players[id].y + PLAYER_SIZE / 2,
@@ -605,12 +634,17 @@ canvas.addEventListener('mousedown', (e) => {
   if (!joined) return;
 
   if (e.button === 2) {
-    shootCone(); // tir spécial
-    mouseDown = false; // ← empêche tir automatique derrière
+    rightMouseDown = true;
   } else if (e.button === 0) {
     mouseDown = true;
   }
 });
+
+canvas.addEventListener('mouseup', (e) => {
+  if (e.button === 2) rightMouseDown = false;
+  if (e.button === 0) mouseDown = false;
+});
+
 
 canvas.addEventListener('mouseup', () => {
   mouseDown = false;
@@ -704,4 +738,8 @@ socket.on('playerDashed', () => {
 socket.on('sniperFired', () => {
   soundSniper.currentTime = 0;
   soundSniper.play().catch(() => {});
+});
+socket.on('youGotHit', () => {
+  soundHit.currentTime = 0;
+  soundHit.play().catch(() => {});
 });
